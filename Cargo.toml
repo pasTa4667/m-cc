@@ -1,0 +1,21 @@
+[package]
+name = "m-cc"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [".", "load-test"]
+default-members = ["."]
+resolver = "3"
+
+[dependencies]
+axum = "0.8.8"
+bytes = { version = "1.11.1", features = ["serde"] }
+crossbeam = "0.8.4"
+dashmap = "6.1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.50.0", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+serde_json = "1.0.140"
+tower = { version = "0.5.2", features = ["util"] }
