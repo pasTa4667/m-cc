@@ -14,7 +14,6 @@ async fn main() {
     });
 
     let topic_manager = Arc::new(TopicManager::new());
-
     let state = Arc::new(AppState {
         queue: message_queue,
         topic_manager,

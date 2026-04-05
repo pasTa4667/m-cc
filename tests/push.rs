@@ -20,7 +20,6 @@ async fn push_returns_accepted_count_and_forwards_messages() {
     });
 
     let topic_manager = Arc::new(TopicManager::new());
-
     let state = Arc::new(AppState {
         queue: message_queue,
         topic_manager,
@@ -60,7 +59,6 @@ async fn push_empty_messages_returns_zero() {
     });
 
     let topic_manager = Arc::new(TopicManager::new());
-
     let state = Arc::new(AppState {
         queue: message_queue,
         topic_manager,

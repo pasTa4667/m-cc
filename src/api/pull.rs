@@ -2,11 +2,12 @@ use std::sync::{Arc, atomic::Ordering};
 
 use axum::{
     extract::{Query, State},
+    http::StatusCode,
     response::IntoResponse,
 };
 use bytes::Bytes;
 
-use crate::{AppState, queue::ParallelQueue, types::message::PullParams};
+use crate::{AppState, types::message::PullParams};
 
 pub async fn pull_handler(
     State(state): State<Arc<AppState>>,
@@ -15,20 +16,23 @@ pub async fn pull_handler(
     let batch_size = params.batch.unwrap_or(100).min(1000);
     let messages: Vec<Bytes>;
 
-    if let Some(topic) = params.topic {
-        let topic_queue = state.topic_manager.get_or_create(topic);
+    let default = "default";
+    let consumer_id = params.consumer_id.as_deref().unwrap_or(default);
 
-        messages = topic_queue.pop_batch_parallel(batch_size).await;
-    } else {
-        messages = state.queue.pop_batch_parallel(batch_size).await;
+    let topic = params.topic.as_deref().unwrap_or(default);
+    match state.topic_manager.get(topic) {
+        Some(topic_log) => {
+            messages = topic_log.read_batch(consumer_id, batch_size);
+        }
+        None => {
+            return (StatusCode::NOT_FOUND).into_response();
+        }
     }
-
-    let accepted = messages.len();
 
     state
         .metrics
         .delivered
-        .fetch_add(accepted as u64, Ordering::Relaxed);
+        .fetch_add(messages.len() as u64, Ordering::Relaxed);
 
     encode_messages(messages).into_response()
 }

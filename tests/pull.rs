@@ -19,7 +19,6 @@ async fn pull_empty_queue_returns_empty_messages() {
     });
 
     let topic_manager = Arc::new(TopicManager::new());
-
     let state = Arc::new(AppState {
         queue: message_queue,
         topic_manager,
@@ -56,7 +55,6 @@ async fn pull_returns_messages_after_push() {
     });
 
     let topic_manager = Arc::new(TopicManager::new());
-
     let state = Arc::new(AppState {
         queue: message_queue,
         topic_manager,

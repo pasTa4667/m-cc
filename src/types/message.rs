@@ -9,4 +9,5 @@ pub struct PushParams {
 pub struct PullParams {
     pub batch: Option<usize>,
     pub topic: Option<String>,
+    pub consumer_id: Option<String>,
 }

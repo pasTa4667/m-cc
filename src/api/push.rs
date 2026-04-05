@@ -1,6 +1,5 @@
 use std::sync::{Arc, atomic::Ordering};
 
-use crate::queue::MessageQueue;
 use crate::{AppState, types::message::PushParams};
 use axum::{
     extract::{Query, State},
@@ -10,18 +9,13 @@ use bytes::Bytes;
 
 pub async fn push_handler(
     State(state): State<Arc<AppState>>,
-    Query(param): Query<PushParams>,
+    Query(params): Query<PushParams>,
     body: Bytes,
 ) -> impl IntoResponse {
     let msgs: Vec<Bytes> = parse_messages(body);
-    let accepted: usize;
 
-    if let Some(topic) = param.topic {
-        let queue = state.topic_manager.get_or_create(topic);
-        accepted = queue.push_batch(msgs);
-    } else {
-        accepted = state.queue.push_batch(msgs);
-    }
+    let topic = params.topic.as_deref().unwrap_or("default");
+    let accepted = state.topic_manager.get_or_create(topic).append_batch(&msgs);
 
     state
         .metrics

@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub mod api;
+pub mod log;
 pub mod managers;
 pub mod queue;
 pub mod types;

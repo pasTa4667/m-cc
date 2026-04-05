@@ -1,23 +1,34 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use dashmap::DashMap;
 
-use crate::queue::in_memory::ShardedQueue;
+use crate::log::log::Log;
 
 pub struct TopicManager {
-    pub topics: DashMap<String, Arc<ShardedQueue>>,
+    pub topic_logs: DashMap<String, Arc<Log>>,
+    pub base_path: PathBuf,
 }
 
 impl TopicManager {
     pub fn new() -> Self {
+        let base_path = PathBuf::from("E:\\Felix\\Programming\\ReactProjects\\m-cc\\target\\tmp");
         Self {
-            topics: DashMap::new(),
+            topic_logs: DashMap::new(),
+            base_path,
         }
     }
-    pub fn get_or_create(&self, topic: String) -> Arc<ShardedQueue> {
-        self.topics
-            .entry(topic)
-            .or_insert_with(|| Arc::new(ShardedQueue::new(8, 100_000)))
+    pub fn get_or_create(&self, topic: &str) -> Arc<Log> {
+        self.topic_logs
+            .entry(topic.to_string())
+            .or_insert_with(|| Arc::new(Log::new(self.base_path.join(topic).as_path())))
             .clone()
+    }
+
+    pub fn get(&self, topic: &str) -> Option<Arc<Log>> {
+        if self.topic_logs.contains_key(topic) {
+            return Some(self.get_or_create(topic));
+        }
+
+        None
     }
 }
