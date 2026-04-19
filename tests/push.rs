@@ -4,7 +4,6 @@ use std::sync::atomic::AtomicU64;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use m_cc::managers::topic_manager::TopicManager;
-use m_cc::queue::in_memory::ShardedQueue;
 use m_cc::types::metrics::Metrics;
 use m_cc::{AppState, app};
 use serde_json::json;
@@ -12,8 +11,6 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn push_returns_accepted_count_and_forwards_messages() {
-    let message_queue = Arc::new(ShardedQueue::new(8, 100_000));
-
     let metrics = Arc::new(Metrics {
         delivered: AtomicU64::new(0),
         received: AtomicU64::new(0),
@@ -21,7 +18,6 @@ async fn push_returns_accepted_count_and_forwards_messages() {
 
     let topic_manager = Arc::new(TopicManager::new());
     let state = Arc::new(AppState {
-        queue: message_queue,
         topic_manager,
         metrics,
     });
@@ -51,8 +47,6 @@ async fn push_returns_accepted_count_and_forwards_messages() {
 
 #[tokio::test]
 async fn push_empty_messages_returns_zero() {
-    let message_queue = Arc::new(ShardedQueue::new(8, 100_000));
-
     let metrics = Arc::new(Metrics {
         delivered: AtomicU64::new(0),
         received: AtomicU64::new(0),
@@ -60,7 +54,6 @@ async fn push_empty_messages_returns_zero() {
 
     let topic_manager = Arc::new(TopicManager::new());
     let state = Arc::new(AppState {
-        queue: message_queue,
         topic_manager,
         metrics,
     });

@@ -1,103 +1,13 @@
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     atomic::{AtomicUsize, Ordering},
 };
 
 use bytes::Bytes;
 use crossbeam::queue::ArrayQueue;
-use tokio::{sync::mpsc, task};
+use tokio::task;
 
 use crate::queue::{MessageQueue, ParallelQueue};
-
-pub struct MpscQueue {
-    sender: mpsc::Sender<Bytes>,
-    receiver: Mutex<mpsc::Receiver<Bytes>>,
-}
-
-impl MpscQueue {
-    pub fn new(capacity: usize) -> Self {
-        let (sender, receiver) = mpsc::channel(capacity);
-        Self {
-            sender,
-            receiver: Mutex::new(receiver),
-        }
-    }
-
-    pub fn sender(&self) -> mpsc::Sender<Bytes> {
-        self.sender.clone()
-    }
-}
-
-impl MessageQueue for MpscQueue {
-    fn push(&self, msg: Bytes) -> Result<(), ()> {
-        self.sender.try_send(msg).map_err(|_| ())
-    }
-
-    fn pop_batch(&self, max: usize) -> Vec<Bytes> {
-        let mut batch = Vec::with_capacity(max);
-
-        let mut receiver = self.receiver.lock().unwrap();
-
-        for _ in 0..max {
-            match receiver.try_recv() {
-                Ok(msg) => batch.push(msg),
-                Err(_) => break,
-            }
-        }
-
-        batch
-    }
-
-    fn push_batch(&self, msgs: Vec<Bytes>) -> usize {
-        let _ = msgs;
-        todo!()
-    }
-}
-
-pub struct LockFreeQueue {
-    pub queue: ArrayQueue<Bytes>,
-}
-
-impl LockFreeQueue {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            queue: ArrayQueue::new(capacity),
-        }
-    }
-}
-
-impl MessageQueue for LockFreeQueue {
-    fn push(&self, msg: Bytes) -> Result<(), ()> {
-        self.queue.push(msg).map_err(|_| ())
-    }
-
-    fn push_batch(&self, msgs: Vec<Bytes>) -> usize {
-        let mut pushed: usize = 0;
-
-        for msg in msgs {
-            if self.queue.push(msg).is_ok() {
-                pushed += 1;
-            } else {
-                break;
-            }
-        }
-
-        pushed
-    }
-
-    fn pop_batch(&self, max: usize) -> Vec<Bytes> {
-        let mut batch = Vec::with_capacity(max);
-
-        for _ in 0..max {
-            match self.queue.pop() {
-                Some(msg) => batch.push(msg),
-                None => break,
-            }
-        }
-
-        batch
-    }
-}
 
 pub struct ShardedQueue {
     queues: Vec<ArrayQueue<Bytes>>,

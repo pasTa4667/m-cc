@@ -110,10 +110,7 @@ async fn main() {
         producer_handles.push(tokio::spawn(async move {
             for _ in 0..(messages_per_worker / batch_size) {
                 let body = encode_messages(batch_size);
-                let url = format!(
-                    "{}/push?topic=topic-{}",
-                    BASE_URL, topic_id
-                );
+                let url = format!("{}/push?topic=topic-{}", BASE_URL, topic_id);
                 let _ = client.post(&url).body(body).send().await;
             }
         }));

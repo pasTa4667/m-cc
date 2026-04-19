@@ -8,18 +8,17 @@ use axum::{
 use crate::{
     api::{metrics::metrics_handler, pull::pull_handler, push::push_handler},
     managers::topic_manager::TopicManager,
-    queue::in_memory::ShardedQueue,
     types::metrics::Metrics,
 };
 
 pub mod api;
+pub mod enums;
 pub mod log;
 pub mod managers;
 pub mod queue;
 pub mod types;
 
 pub struct AppState {
-    pub queue: Arc<ShardedQueue>,
     pub topic_manager: Arc<TopicManager>,
     pub metrics: Arc<Metrics>,
 }

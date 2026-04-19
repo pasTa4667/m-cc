@@ -1,13 +1,17 @@
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use crossbeam::channel::{Sender, unbounded};
 use dashmap::DashMap;
+use parking_lot::Mutex;
+
+use crate::enums::Command;
 
 pub struct Log {
-    writer: Mutex<BufWriter<File>>,
+    sender: Sender<Command>,
     reader: Mutex<BufReader<File>>,
     offsets: DashMap<String, usize>,
 }
@@ -21,31 +25,26 @@ impl Log {
             .open(path)
             .unwrap();
 
-        let writer = BufWriter::new(file.try_clone().unwrap());
-        let reader = BufReader::new(file.try_clone().unwrap());
+        let reader = BufReader::new(file);
+
+        let sender = spawn_writer(path);
 
         Self {
-            writer: Mutex::new(writer),
+            sender,
             reader: Mutex::new(reader),
             offsets: DashMap::new(),
         }
     }
 
-    pub fn append_batch(&self, messages: &Vec<Bytes>) -> usize {
-        let mut writer = self.writer.lock().unwrap();
+    pub fn append_batch(&self, messages: Vec<Bytes>) -> usize {
+        let len = messages.len();
+        self.sender.send(Command::Append(messages)).unwrap();
 
-        for msg in messages {
-            let len = msg.len() as u32;
-            writer.write_all(&len.to_be_bytes()).unwrap();
-            writer.write_all(msg).unwrap();
-        }
-
-        messages.len()
-        // writer.flush().unwrap();
+        len
     }
 
     pub fn read_batch(&self, consumer_id: &str, max_messages: usize) -> Vec<Bytes> {
-        let mut reader = self.reader.lock().unwrap();
+        let mut reader = self.reader.lock();
 
         let mut offset = match self.offsets.get_mut(consumer_id) {
             Some(o) => o,
@@ -75,4 +74,68 @@ impl Log {
 
         messages
     }
+}
+
+fn spawn_writer(path: &Path) -> Sender<Command> {
+    let (tx, rx) = unbounded::<Command>();
+    let path = path.to_owned();
+
+    std::thread::spawn(move || {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .read(true)
+            .open(path)
+            .unwrap();
+
+        let mut writer = BufWriter::with_capacity(8 << 20, file); // 8MB
+
+        const MAX_BATCH_COMMANDS: usize = 8 * 8192;
+        const FLUSH_BYTES: usize = 32 * 1024 * 1024; // 32MB
+        const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
+
+        let mut buffer = Vec::with_capacity(1024);
+        let mut bytes_written = 0usize;
+        let mut last_flush = Instant::now();
+
+        loop {
+            match rx.recv() {
+                Ok(cmd) => buffer.push(cmd),
+                Err(_) => break,
+            };
+
+            while buffer.len() < MAX_BATCH_COMMANDS {
+                match rx.try_recv() {
+                    Ok(cmd) => buffer.push(cmd),
+                    Err(_) => break,
+                }
+            }
+
+            let mut batch_buf = Vec::with_capacity(1024);
+
+            for cmd in buffer.drain(..) {
+                match cmd {
+                    Command::Append(messages) => {
+                        for msg in messages {
+                            batch_buf.extend_from_slice(&(msg.len() as u32).to_be_bytes());
+                            batch_buf.extend_from_slice(&msg);
+                            bytes_written += 4 + msg.len();
+                        }
+                    }
+                }
+            }
+
+            writer.write_all(&batch_buf).unwrap();
+
+            if bytes_written >= FLUSH_BYTES || last_flush.elapsed() >= FLUSH_INTERVAL {
+                writer.flush().unwrap();
+                bytes_written = 0;
+                last_flush = Instant::now();
+            }
+        }
+
+        writer.flush().unwrap();
+    });
+
+    tx
 }

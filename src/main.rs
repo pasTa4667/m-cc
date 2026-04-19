@@ -1,13 +1,9 @@
 use std::sync::{Arc, atomic::AtomicU64};
 
-use m_cc::{
-    AppState, app, managers::topic_manager::TopicManager, queue::in_memory::ShardedQueue,
-    types::metrics::Metrics,
-};
+use m_cc::{AppState, app, managers::topic_manager::TopicManager, types::metrics::Metrics};
 
 #[tokio::main]
 async fn main() {
-    let message_queue = Arc::new(ShardedQueue::new(8, 100_000));
     let metrics = Arc::new(Metrics {
         delivered: AtomicU64::new(0),
         received: AtomicU64::new(0),
@@ -15,7 +11,6 @@ async fn main() {
 
     let topic_manager = Arc::new(TopicManager::new());
     let state = Arc::new(AppState {
-        queue: message_queue,
         topic_manager,
         metrics,
     });

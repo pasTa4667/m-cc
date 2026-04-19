@@ -15,7 +15,7 @@ pub async fn push_handler(
     let msgs: Vec<Bytes> = parse_messages(body);
 
     let topic = params.topic.as_deref().unwrap_or("default");
-    let accepted = state.topic_manager.get_or_create(topic).append_batch(&msgs);
+    let accepted = state.topic_manager.get_or_create(topic).append_batch(msgs);
 
     state
         .metrics
