@@ -7,6 +7,7 @@ use axum::{
 
 use crate::{
     api::{metrics::metrics_handler, pull::pull_handler, push::push_handler},
+    config::AppConfig,
     managers::topic_manager::TopicManager,
     types::metrics::Metrics,
 };
@@ -18,9 +19,12 @@ pub mod managers;
 pub mod queue;
 pub mod types;
 
+pub mod config;
+
 pub struct AppState {
     pub topic_manager: Arc<TopicManager>,
     pub metrics: Arc<Metrics>,
+    pub app_config: Arc<AppConfig>,
 }
 
 pub fn app(state: Arc<AppState>) -> Router {

@@ -9,13 +9,16 @@ default-members = ["."]
 resolver = "3"
 
 [dependencies]
+anyhow = "1.0.102"
 axum = "0.8.8"
 bytes = { version = "1.11.1", features = ["serde"] }
 crossbeam = "0.8.4"
 dashmap = "6.1.0"
 parking_lot = "0.12.5"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
 tokio = { version = "1.50.0", features = ["macros", "rt-multi-thread"] }
+clap = { version = "4.6.1", features = ["derive"]}
 
 [dev-dependencies]
 serde_json = "1.0.140"

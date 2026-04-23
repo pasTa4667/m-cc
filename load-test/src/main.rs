@@ -1,24 +1,63 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use clap::Parser;
 use reqwest::Client;
 use reqwest::StatusCode;
+use rand::RngCore;
 use tokio::time::{Duration, Instant};
 
-const BASE_URL: &str = "http://localhost:3000";
 const NUM_TOPICS: usize = 10;
 /// Distinct `consumer_id` values per topic (independent offsets = separate consumer groups).
 const NUM_CONSUMER_GROUPS: usize = 5;
+const MSG_SIZE_MIN_BYTES: usize = 256;
+const MSG_SIZE_P95_BYTES: usize = 4096;
+const MSG_SIZE_MAX_BYTES: usize = 16384;
 
-fn encode_messages(batch_size: usize) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(batch_size * (4 + 5));
+#[derive(Parser)]
+#[command(name = "m-cc-load-test")]
+#[command(about = "Run load tests against the m-cc HTTP endpoints")]
+struct CliArgs {
+    /// Use the smallest possible message size for feature verification runs
+    #[arg(short, long)]
+    feature: bool,
+    /// Address of the target server (without protocol and port)
+    #[arg(long, default_value = "localhost")]
+    address: String,
+    /// Port of the target server
+    #[arg(short, long, default_value_t = 3000)]
+    port: u16,
+}
+
+fn encode_messages(batch_size: usize, feature_mode: bool) -> Vec<u8> {
+    let mut rng = rand::thread_rng();
+    let mut buf = Vec::with_capacity(batch_size * MSG_SIZE_P95_BYTES);
 
     for _ in 0..batch_size {
-        let msg = b"hello";
+        let msg_len = if feature_mode {
+            MSG_SIZE_MIN_BYTES
+        } else {
+            let chance = rng.next_u32() % 10000;
+            match chance {
+                0..=8499 => {
+                    rng.next_u32() as usize % (MSG_SIZE_P95_BYTES - MSG_SIZE_MIN_BYTES + 1)
+                        + MSG_SIZE_MIN_BYTES
+                }
+                8500..=9899 => MSG_SIZE_P95_BYTES + (rng.next_u32() as usize % 2048),
+                _ => {
+                    MSG_SIZE_P95_BYTES + 2048
+                        + (rng.next_u32() as usize
+                            % (MSG_SIZE_MAX_BYTES - (MSG_SIZE_P95_BYTES + 2048) + 1))
+                }
+            }
+        };
+
+        let mut msg = vec![0u8; msg_len];
+        rng.fill_bytes(&mut msg);
         let len = msg.len() as u32;
 
         buf.extend_from_slice(&len.to_be_bytes());
-        buf.extend_from_slice(msg);
+        buf.extend_from_slice(&msg);
     }
 
     buf
@@ -45,7 +84,9 @@ fn count_messages(body: &[u8]) -> usize {
 
 #[tokio::main]
 async fn main() {
+    let args = CliArgs::parse();
     let client = Client::new();
+    let base_url = format!("http://{}:{}", args.address, args.port);
 
     let producer_workers = 100;
     let messages_per_worker = 10_000;
@@ -61,15 +102,15 @@ async fn main() {
             let client = client.clone();
             let producers_done = producers_done.clone();
             let total_pulled = total_pulled.clone();
-            let base = BASE_URL.to_string();
+            let base = base_url.clone();
 
             consumer_handles.push(tokio::spawn(async move {
                 let topic = format!("topic-{}", topic_idx);
                 let consumer_id = format!("group-{}", group_idx);
                 let url = format!(
-                    "{}/pull?topic={}&consumer_id={}&batch={}",
-                    base, topic, consumer_id, batch_size
-                );
+                "{}/pull?topic={}&consumer_id={}&batch={}",
+                base, topic, consumer_id, batch_size
+            );
 
                 loop {
                     let Ok(resp) = client.get(&url).send().await else {
@@ -106,11 +147,12 @@ async fn main() {
     for i in 0..producer_workers {
         let client = client.clone();
         let topic_id = i % NUM_TOPICS;
+        let base = base_url.clone();
 
         producer_handles.push(tokio::spawn(async move {
             for _ in 0..(messages_per_worker / batch_size) {
-                let body = encode_messages(batch_size);
-                let url = format!("{}/push?topic=topic-{}", BASE_URL, topic_id);
+                let body = encode_messages(batch_size, args.feature);
+                let url = format!("{}/push?topic=topic-{}", base, topic_id);
                 let _ = client.post(&url).body(body).send().await;
             }
         }));

@@ -2,25 +2,33 @@ use std::{path::PathBuf, sync::Arc};
 
 use dashmap::DashMap;
 
-use crate::log::log::Log;
+use crate::{config::WriterConfig, log::log::Log};
 
 pub struct TopicManager {
     pub topic_logs: DashMap<String, Arc<Log>>,
     pub base_path: PathBuf,
+    pub writer_config: WriterConfig,
 }
 
 impl TopicManager {
-    pub fn new() -> Self {
-        let base_path = PathBuf::from("E:\\Felix\\Programming\\ReactProjects\\m-cc\\target\\tmp");
+    pub fn new(path: &str, writer_config: WriterConfig) -> Self {
+        let base_path = PathBuf::from(path);
         Self {
             topic_logs: DashMap::new(),
             base_path,
+            writer_config,
         }
     }
+
     pub fn get_or_create(&self, topic: &str) -> Arc<Log> {
         self.topic_logs
             .entry(topic.to_string())
-            .or_insert_with(|| Arc::new(Log::new(self.base_path.join(topic).as_path())))
+            .or_insert_with(|| {
+                Arc::new(Log::new(
+                    self.base_path.join(topic).as_path(),
+                    self.writer_config,
+                ))
+            })
             .clone()
     }
 

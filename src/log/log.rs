@@ -8,6 +8,7 @@ use crossbeam::channel::{Sender, unbounded};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 
+use crate::config::WriterConfig;
 use crate::enums::Command;
 
 pub struct Log {
@@ -17,7 +18,7 @@ pub struct Log {
 }
 
 impl Log {
-    pub fn new(path: &Path) -> Self {
+    pub fn new(path: &Path, writer_config: WriterConfig) -> Self {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -27,7 +28,7 @@ impl Log {
 
         let reader = BufReader::new(file);
 
-        let sender = spawn_writer(path);
+        let sender = spawn_writer(path, writer_config);
 
         Self {
             sender,
@@ -76,9 +77,13 @@ impl Log {
     }
 }
 
-fn spawn_writer(path: &Path) -> Sender<Command> {
+fn spawn_writer(path: &Path, config: WriterConfig) -> Sender<Command> {
     let (tx, rx) = unbounded::<Command>();
     let path = path.to_owned();
+
+    let max_batch_commands = config.max_batch_commands;
+    let flush_bytes = config.flush_bytes;
+    let flush_interval = Duration::from_millis(config.flush_interval_ms);
 
     std::thread::spawn(move || {
         let file = OpenOptions::new()
@@ -90,10 +95,6 @@ fn spawn_writer(path: &Path) -> Sender<Command> {
 
         let mut writer = BufWriter::with_capacity(8 << 20, file); // 8MB
 
-        const MAX_BATCH_COMMANDS: usize = 8 * 8192;
-        const FLUSH_BYTES: usize = 32 * 1024 * 1024; // 32MB
-        const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
-
         let mut buffer = Vec::with_capacity(1024);
         let mut bytes_written = 0usize;
         let mut last_flush = Instant::now();
@@ -104,7 +105,7 @@ fn spawn_writer(path: &Path) -> Sender<Command> {
                 Err(_) => break,
             };
 
-            while buffer.len() < MAX_BATCH_COMMANDS {
+            while buffer.len() < max_batch_commands {
                 match rx.try_recv() {
                     Ok(cmd) => buffer.push(cmd),
                     Err(_) => break,
@@ -127,7 +128,7 @@ fn spawn_writer(path: &Path) -> Sender<Command> {
 
             writer.write_all(&batch_buf).unwrap();
 
-            if bytes_written >= FLUSH_BYTES || last_flush.elapsed() >= FLUSH_INTERVAL {
+            if bytes_written >= flush_bytes || last_flush.elapsed() >= flush_interval {
                 writer.flush().unwrap();
                 bytes_written = 0;
                 last_flush = Instant::now();
