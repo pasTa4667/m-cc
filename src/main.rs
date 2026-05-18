@@ -1,4 +1,5 @@
 use std::{
+    fs,
     path::PathBuf,
     sync::{Arc, atomic::AtomicU64},
 };
@@ -7,7 +8,10 @@ use clap::Parser;
 use m_cc::{
     AppState, app,
     config::{AppConfig, Config},
-    managers::topic_manager::TopicManager,
+    managers::{
+        offset_manager::{self, OffsetManager},
+        topic_manager::TopicManager,
+    },
     types::metrics::Metrics,
 };
 
@@ -37,7 +41,21 @@ async fn main() {
         Config::get_default_values()
     });
 
+    let data_directory = PathBuf::from(&config.storage.data_dir);
+
+    if let Err(_) = data_directory.try_exists() {
+        println!("Trying to create directory");
+        if let Err(err) = fs::create_dir_all(&data_directory) {
+            eprintln!(
+                "Could not create storage directory, please check your data storage config, {}",
+                err
+            );
+            return;
+        }
+    }
+
     let topic_manager = Arc::new(TopicManager::new(&config.storage.data_dir, config.writer));
+    let offset_manager = Arc::new(OffsetManager::new(&config.storage.data_dir));
 
     let app_config = AppConfig {
         runtime: config.runtime,
@@ -45,6 +63,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         topic_manager,
+        offset_manager,
         metrics,
         app_config: Arc::new(app_config),
     });

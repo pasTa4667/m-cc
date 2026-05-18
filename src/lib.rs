@@ -8,7 +8,7 @@ use axum::{
 use crate::{
     api::{metrics::metrics_handler, pull::pull_handler, push::push_handler},
     config::AppConfig,
-    managers::topic_manager::TopicManager,
+    managers::{offset_manager::OffsetManager, topic_manager::TopicManager},
     types::metrics::Metrics,
 };
 
@@ -23,6 +23,7 @@ pub mod config;
 
 pub struct AppState {
     pub topic_manager: Arc<TopicManager>,
+    pub offset_manager: Arc<OffsetManager>,
     pub metrics: Arc<Metrics>,
     pub app_config: Arc<AppConfig>,
 }

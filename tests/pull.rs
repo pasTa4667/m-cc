@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicU64;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use m_cc::config::{AppConfig, Config};
+use m_cc::managers::offset_manager::OffsetManager;
 use m_cc::managers::topic_manager::TopicManager;
 use m_cc::types::metrics::Metrics;
 use m_cc::{AppState, app};
@@ -18,6 +19,7 @@ fn build_state() -> Arc<AppState> {
     let config = Config::get_default_values();
 
     let topic_manager = Arc::new(TopicManager::new(&config.storage.data_dir, config.writer));
+    let offset_manager = Arc::new(OffsetManager::new(&config.storage.data_dir));
 
     let app_config = AppConfig {
         runtime: config.runtime,
@@ -25,6 +27,7 @@ fn build_state() -> Arc<AppState> {
 
     Arc::new(AppState {
         topic_manager,
+        offset_manager,
         metrics,
         app_config: Arc::new(app_config),
     })
