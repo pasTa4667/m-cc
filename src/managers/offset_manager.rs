@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 use crossbeam::channel::{Sender, unbounded};
 use parking_lot::Mutex;
 
@@ -27,7 +27,7 @@ pub struct OffsetManager {
 impl OffsetManager {
     pub fn new(path: &str) -> Self {
         let mut path_buf = PathBuf::from(path);
-        path_buf.push("/consumer_offsets_backup.txt");
+        path_buf.push("/consumer_offsets_backup.log");
 
         let file = OpenOptions::new()
             .create(true)
@@ -48,7 +48,6 @@ impl OffsetManager {
     }
 
     pub fn read(&self) -> usize {
-        // TODO
         0
     }
 
@@ -62,16 +61,11 @@ impl OffsetManager {
         buf.put_u32(offset_key.topic.len() as u32);
         buf.put_slice(offset_key.topic.as_bytes());
 
-        buf.put_slice(&offset.to_be_bytes());
-        buf.put_u32(offset as u32);
+        buf.put_u64(offset as u64);
 
-        let result = self.sender.send(OffsetCommand::Append(buf));
-
-        if result.is_err() {
-            return Err(AppError::WriteError("Failed to commit offset".to_string()));
-        }
-
-        Ok(())
+        self.sender
+            .send(OffsetCommand::Append(buf))
+            .map_err(|_| AppError::WriteError("Failed to persist offset".to_string()))
     }
 }
 
@@ -86,7 +80,7 @@ fn spawn_writer(path_buf: PathBuf) -> Sender<OffsetCommand> {
             .open(path_buf)
             .unwrap();
 
-        let mut writer = BufWriter::with_capacity(2 << 20, file); // 8MB
+        let mut writer = BufWriter::with_capacity(2 << 20, file);
 
         let max_batch_command = 65536;
         let flush_bytes = 33554432;
