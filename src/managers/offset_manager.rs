@@ -1,17 +1,16 @@
 use std::{
-    collections::HashMap,
-    fs::{File, OpenOptions},
-    io::{BufReader, BufWriter, Write},
-    path::PathBuf,
-    time::{Duration, Instant},
+    collections::HashMap, fs::{File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::PathBuf, sync::Arc, time::{Duration, Instant}
 };
 
 use bytes::{BufMut, BytesMut};
 use crossbeam::channel::{Sender, unbounded};
 use parking_lot::Mutex;
 
-use crate::enums::{AppError, OffsetCommand};
+use crate::enums::{AppError, OffsetCommand, WriterState};
 
+type WriterStateType = Arc<Mutex<WriterState>>;
+
+ #[derive(Eq, Hash, PartialEq, Clone)]
 pub struct OffsetKey {
     pub topic: String,
     pub group_id: Option<String>,
@@ -19,15 +18,16 @@ pub struct OffsetKey {
 
 /// Offset Manager for Consumer Backup Offsets
 pub struct OffsetManager {
-    offsets: HashMap<OffsetKey, usize>,
+    offsets: Mutex<HashMap<OffsetKey, usize>>,
     reader: Mutex<BufReader<File>>,
     sender: Sender<OffsetCommand>,
+    writer_state: WriterStateType,
 }
 
 impl OffsetManager {
     pub fn new(path: &str) -> Self {
         let mut path_buf = PathBuf::from(path);
-        path_buf.push("/consumer_offsets_backup.log");
+        path_buf.push("consumer_offsets_backup.log");
 
         let file = OpenOptions::new()
             .create(true)
@@ -35,15 +35,18 @@ impl OffsetManager {
             .read(true)
             .open(&path_buf)
             .unwrap();
+        
+        let writer_state = Arc::new(Mutex::new(WriterState::Healthy));
 
         let reader = Mutex::new(BufReader::new(file));
 
-        let sender = spawn_writer(path_buf);
+        let sender = spawn_writer(path_buf, writer_state.clone());
 
         Self {
-            offsets: HashMap::new(),
+            offsets: Mutex::new(HashMap::new()),
             reader,
             sender,
+            writer_state,
         }
     }
 
@@ -52,34 +55,60 @@ impl OffsetManager {
     }
 
     pub fn append(&self, offset_key: OffsetKey, offset: usize) -> Result<(), AppError> {
-        let mut buf = BytesMut::new();
-        if let Some(group_id) = offset_key.group_id {
-            buf.put_u32(group_id.len() as u32);
-            buf.put_slice(group_id.as_bytes());
+        let offset_to_save = offset_key.clone();
+
+        match &*self.writer_state.lock() {
+            WriterState::Healthy => {},
+            WriterState::Failure(error) => {
+                return Err(AppError::WriteError(error.to_owned()));
+            }
         }
 
-        buf.put_u32(offset_key.topic.len() as u32);
-        buf.put_slice(offset_key.topic.as_bytes());
+        let mut buf = BytesMut::new();
+        match offset_to_save.group_id {
+            Some(group_id) => {
+                buf.put_u32(group_id.len() as u32);
+                buf.put_slice(group_id.as_bytes());
+            },
+            None => {
+                buf.put_u32(0);
+            }
+        }
+
+        buf.put_u32(offset_to_save.topic.len() as u32);
+        buf.put_slice(offset_to_save.topic.as_bytes());
 
         buf.put_u64(offset as u64);
 
-        self.sender
-            .send(OffsetCommand::Append(buf))
-            .map_err(|_| AppError::WriteError("Failed to persist offset".to_string()))
+        match self.sender
+            .send(OffsetCommand::Append(buf)) {
+                Ok(()) => {
+                    self.insert_offset(offset_key, offset);
+                    Ok(())
+                },
+                Err(_) => {
+                    Err(AppError::WriteError("Failed to persist offset".to_string()))
+                }
+            }
+    }
+
+    fn insert_offset(&self, offset_key: OffsetKey, offset: usize) {
+        let mut offsets = self.offsets.lock();
+        offsets.insert(offset_key, offset);
     }
 }
 
-fn spawn_writer(path_buf: PathBuf) -> Sender<OffsetCommand> {
+fn spawn_writer(path_buf: PathBuf, writer_state: WriterStateType) -> Sender<OffsetCommand> {
     let (tx, rx) = unbounded::<OffsetCommand>();
 
-    std::thread::spawn(move || {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .read(true)
-            .open(path_buf)
-            .unwrap();
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(path_buf)
+        .unwrap();
 
+    std::thread::spawn(move || {
         let mut writer = BufWriter::with_capacity(2 << 20, file);
 
         let max_batch_command = 65536;
@@ -108,25 +137,30 @@ fn spawn_writer(path_buf: PathBuf) -> Sender<OffsetCommand> {
             for cmd in buffer.drain(..) {
                 match cmd {
                     OffsetCommand::Append(offsets) => {
-                        for ofs in offsets {
-                            batch_buf.extend_from_slice(&(ofs).to_be_bytes());
-                            batch_buf.push(ofs);
-                            bytes_written += 4 + ofs as usize;
-                        }
+                        batch_buf.extend_from_slice(&offsets);
+                        bytes_written += offsets.len();
                     }
                 }
             }
 
-            writer.write_all(&batch_buf).unwrap();
+            if let Err(e) = writer.write_all(&batch_buf) {
+                *writer_state.lock() = WriterState::Failure(e.to_string());
+                break;
+            }
 
             if bytes_written >= flush_bytes || last_flush.elapsed() >= flush_interval {
-                writer.flush().unwrap();
+                if let Err(e) = writer.flush() {
+                    *writer_state.lock() = WriterState::Failure(e.to_string());
+                    break; 
+                }
                 bytes_written = 0;
                 last_flush = Instant::now();
             }
         }
 
-        writer.flush().unwrap();
+        if let Err(e) = writer.flush() {
+            *writer_state.lock() = WriterState::Failure(e.to_string());
+        }
     });
 
     tx
