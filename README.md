@@ -1,7 +1,7 @@
 <!--
 Local development notes and usage for m-cc.
 -->
-
+(In-Progress)
 # m-cc
 
 `m-cc` is a small topic-based message queue service with a simple HTTP API and
